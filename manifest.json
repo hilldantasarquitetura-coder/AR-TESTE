@@ -1,0 +1,10 @@
+{
+  "name": "AR Architecture",
+  "short_name": "AR HD",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#2c2c2e",
+  "theme_color": "#2c2c2e",
+  "description": "Aplicativo AR de arquitetura em modo offline.",
+  "scope": "."
+}
