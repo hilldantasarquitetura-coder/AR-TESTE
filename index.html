@@ -8,8 +8,8 @@
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c2c2e">
     
-    <link rel="apple-touch-icon" href="logo-master.png?v=3">
-    <link rel="icon" type="image/png" href="logo-master.png?v=3">
+    <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/P6xMZQAAAABJRU5ErkJggg==">
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/P6xMZQAAAABJRU5ErkJggg==">
     
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -781,9 +781,13 @@
         window.imageTrackingMode = false;
 
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                for(let registration of registrations) { registration.unregister(); }
-            });
+            navigator.serviceWorker.register('sw.js', { scope: './' })
+                .then((registration) => {
+                    console.log('Service worker registrado com sucesso:', registration.scope);
+                })
+                .catch((error) => {
+                    console.warn('Falha ao registrar service worker:', error);
+                });
         }
 
         const supabaseUrl = 'https://czchulnohumyyatzorpy.supabase.co'; 
@@ -836,6 +840,35 @@
         window.xrImageTrackingEnabled = false;
         window.xrImageAnchorToastShown = false;
         window.xrAnchorImageElement = null;
+        window.isInARSession = false;
+
+        window.setImageTrackingModelVisible = function(isVisible) {
+            const sceneSymbol = Object.getOwnPropertySymbols(viewer).find(s => s.description === 'scene');
+            if (!sceneSymbol || !viewer[sceneSymbol]) return;
+            const scene = viewer[sceneSymbol];
+
+            // Oculta/exibe a raiz do modelo GLB
+            const root = window.getGlbRoot();
+            if (root) {
+                root.visible = isVisible;
+            }
+
+            // Oculta/exibe o viewer.model
+            if (viewer.model) {
+                viewer.model.visible = isVisible;
+            }
+
+            // Oculta/exibe o targetGroup
+            const targetGroup = window.getTargetGroup();
+            if (targetGroup) {
+                targetGroup.visible = isVisible;
+            }
+
+            // Força atualização da cena
+            let currentExp = parseFloat(viewer.exposure) || 1.0;
+            viewer.exposure = currentExp + 0.0001;
+            setTimeout(() => { viewer.exposure = currentExp; }, 10);
+        }
 
         // ==========================================
         // MOTOR DE SOBREPOSIÇÃO (COMPATIBILIZAÇÃO)
@@ -1906,6 +1939,7 @@
         viewer.addEventListener('ar-status', (event) => {
             const arOverlay = document.getElementById('ar-overlay-ui'); const mainSidebar = document.getElementById('master-sidebar-container');
             if (event.detail.status === 'session-started') {
+                window.isInARSession = true;
                 arOverlay.classList.remove('ar-overlay-hidden');
                 mainSidebar.classList.add('hidden');
                 const currentInt = parseFloat(viewer.shadowIntensity) || 1.5;
@@ -1913,17 +1947,17 @@
                 showToast("☀️ Câmera Ativa: Sombras e Luzes ancoradas no piso.", 3500, "success");
                 if (window.imageTrackingMode) {
                     window.xrImageAnchorToastShown = false;
-                    const targetGroup = window.getTargetGroup();
-                    if (viewer.model) viewer.model.visible = false;
-                    if (targetGroup) targetGroup.visible = false;
+                    window.setImageTrackingModelVisible(false);
+                    console.log('Image tracking mode: Model hidden at AR start');
                     showToast("Aguardando reconhecimento da imagem de referência...", 5000, "info");
                 }
             } else if (event.detail.status === 'not-presenting') {
+                window.isInARSession = false;
                 arOverlay.classList.add('ar-overlay-hidden');
                 mainSidebar.classList.remove('hidden');
                 viewer.shadowIntensity = document.getElementById('shadow-int-slider').value;
-                const targetGroup = window.getTargetGroup();
                 if (viewer.model) viewer.model.visible = true; // Reset visibility
+                const targetGroup = window.getTargetGroup();
                 if (targetGroup) targetGroup.visible = true;
             }
         });
@@ -2045,8 +2079,15 @@
         window.toggleImageTrackingMode = function(isEnabled) {
             window.imageTrackingMode = isEnabled;
             if (isEnabled) {
+                window.xrImageAnchorToastShown = false;
+                if (window.isInARSession) {
+                    window.setImageTrackingModelVisible(false);
+                }
                 showToast('Modo Rastreamento de Imagem ativado. Modelo só aparecerá ao reconhecer a imagem.', 4000, 'info');
             } else {
+                if (window.isInARSession) {
+                    window.setImageTrackingModelVisible(true);
+                }
                 showToast('Modo Posicionamento Manual ativado. Arraste o modelo em AR.', 4000, 'info');
             }
         }
@@ -2146,6 +2187,7 @@
                     if (trackedPose) {
                         if (viewer.model && !viewer.model.visible) viewer.model.visible = true;
                         if (targetGroup && !targetGroup.visible) targetGroup.visible = true;
+                        console.log('Image detected: Model shown');
                         if (!window.xrImageAnchorToastShown) {
                             showToast('Imagem reconhecida! Modelo ancorado.', 3000, 'success');
                             window.xrImageAnchorToastShown = true;
@@ -2154,6 +2196,7 @@
                     } else {
                         if (viewer.model && viewer.model.visible) viewer.model.visible = false;
                         if (targetGroup && targetGroup.visible) targetGroup.visible = false;
+                        console.log('No image detected: Model hidden');
                     }
                 } else if (trackedPose) {
                     window.applyImageAnchorPose(trackedPose);
@@ -2232,6 +2275,10 @@
         viewer.addEventListener('load', () => {
             const isPbrChecked = document.getElementById('chk-pbr').checked; if(isPbrChecked) { window.togglePBR(true); }
             window.modelBBox = null;
+
+            if (window.imageTrackingMode && window.isInARSession) {
+                window.setImageTrackingModelVisible(false);
+            }
 
             try {
                 const sceneSymbol = Object.getOwnPropertySymbols(viewer).find(s => s.description === 'scene'); if(!sceneSymbol) return; const threeScene = viewer[sceneSymbol];
