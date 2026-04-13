@@ -364,8 +364,14 @@
                         </div>
                         <label style="font-size: 10px; color:#aaa; margin-bottom:5px;">Largura real do marcador (m)</label>
                         <input type="number" id="qr-width-meters" class="qr-input" value="0.25" min="0.05" max="1" step="0.01">
+                        <div class="list-item" style="border:none; padding:0 0 10px 0;">
+                            <label style="color: var(--su-blue); font-weight: bold; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="chk-image-tracking" onchange="window.toggleImageTrackingMode(this.checked)">
+                                USAR RASTREAMENTO DE IMAGEM (SÓ ANCORAR NA IMAGEM)
+                            </label>
+                        </div>
                         <button class="btn-main" onclick="window.enableQrImageTracking()">Ativar Rastreamento de Imagem</button>
-                        <div style="font-size: 10px; color: #ccc; line-height: 1.4;">Use o QR Code ou faça upload de uma imagem de alto contraste como âncora espacial para travar o modelo 1:1.</div>
+                        <div style="font-size: 10px; color: #ccc; line-height: 1.4;">Se ativado, o modelo só aparece em AR quando a câmera reconhece a imagem. Caso contrário, posicione manualmente arrastando.</div>
                     </div>
                     <canvas id="qr-track-canvas" class="hidden"></canvas>
                 </div>
@@ -771,6 +777,8 @@
         import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
         
         window.THREE = THREE;
+
+        window.imageTrackingMode = false;
 
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -1898,9 +1906,25 @@
         viewer.addEventListener('ar-status', (event) => {
             const arOverlay = document.getElementById('ar-overlay-ui'); const mainSidebar = document.getElementById('master-sidebar-container');
             if (event.detail.status === 'session-started') {
-                arOverlay.classList.remove('ar-overlay-hidden'); mainSidebar.classList.add('hidden'); const currentInt = parseFloat(viewer.shadowIntensity) || 1.5; viewer.shadowIntensity = currentInt + 0.5; showToast("☀️ Câmera Ativa: Sombras e Luzes ancoradas no piso.", 3500, "success");
+                arOverlay.classList.remove('ar-overlay-hidden');
+                mainSidebar.classList.add('hidden');
+                const currentInt = parseFloat(viewer.shadowIntensity) || 1.5;
+                viewer.shadowIntensity = currentInt + 0.5;
+                showToast("☀️ Câmera Ativa: Sombras e Luzes ancoradas no piso.", 3500, "success");
+                if (window.imageTrackingMode) {
+                    window.xrImageAnchorToastShown = false;
+                    const targetGroup = window.getTargetGroup();
+                    if (viewer.model) viewer.model.visible = false;
+                    if (targetGroup) targetGroup.visible = false;
+                    showToast("Aguardando reconhecimento da imagem de referência...", 5000, "info");
+                }
             } else if (event.detail.status === 'not-presenting') {
-                arOverlay.classList.add('ar-overlay-hidden'); mainSidebar.classList.remove('hidden'); viewer.shadowIntensity = document.getElementById('shadow-int-slider').value;
+                arOverlay.classList.add('ar-overlay-hidden');
+                mainSidebar.classList.remove('hidden');
+                viewer.shadowIntensity = document.getElementById('shadow-int-slider').value;
+                const targetGroup = window.getTargetGroup();
+                if (viewer.model) viewer.model.visible = true; // Reset visibility
+                if (targetGroup) targetGroup.visible = true;
             }
         });
 
@@ -2011,8 +2035,20 @@
                 return;
             }
             await window.prepareTrackedImageForXR();
+            window.imageTrackingMode = true;
+            const chk = document.getElementById('chk-image-tracking');
+            if (chk) chk.checked = true;
             window.setupXRImageTrackingHook();
-            showToast('Rastreamento de imagem ativado para a sessão AR.', 3000, 'success');
+            showToast('Rastreamento de imagem ativado. O modelo só aparecerá ao reconhecer a imagem.', 3000, 'success');
+        }
+
+        window.toggleImageTrackingMode = function(isEnabled) {
+            window.imageTrackingMode = isEnabled;
+            if (isEnabled) {
+                showToast('Modo Rastreamento de Imagem ativado. Modelo só aparecerá ao reconhecer a imagem.', 4000, 'info');
+            } else {
+                showToast('Modo Posicionamento Manual ativado. Arraste o modelo em AR.', 4000, 'info');
+            }
         }
 
         window.setupXRImageTrackingHook = function() {
@@ -2094,14 +2130,33 @@
                 }
 
                 const results = frame.getImageTrackingResults();
+                let trackedPose = null;
                 for (const result of results) {
                     if (result.trackingState === 'tracked' || result.trackingState === 'emulated') {
                         const pose = frame.getPose(result.imageSpace, session.__trackingReferenceSpace);
                         if (pose) {
-                            window.applyImageAnchorPose(pose);
+                            trackedPose = pose;
                             break;
                         }
                     }
+                }
+
+                if (window.imageTrackingMode) {
+                    const targetGroup = window.getTargetGroup();
+                    if (trackedPose) {
+                        if (viewer.model && !viewer.model.visible) viewer.model.visible = true;
+                        if (targetGroup && !targetGroup.visible) targetGroup.visible = true;
+                        if (!window.xrImageAnchorToastShown) {
+                            showToast('Imagem reconhecida! Modelo ancorado.', 3000, 'success');
+                            window.xrImageAnchorToastShown = true;
+                        }
+                        window.applyImageAnchorPose(trackedPose);
+                    } else {
+                        if (viewer.model && viewer.model.visible) viewer.model.visible = false;
+                        if (targetGroup && targetGroup.visible) targetGroup.visible = false;
+                    }
+                } else if (trackedPose) {
+                    window.applyImageAnchorPose(trackedPose);
                 }
             } catch (error) {
                 console.warn('Falha ao processar quadro XR:', error);
