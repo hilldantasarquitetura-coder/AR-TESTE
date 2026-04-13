@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'ar-app-shell-v1';
+const CACHE_VERSION = 'ar-app-shell-v2';
 const CACHE_ASSETS = [
   './',
   './index.html',
